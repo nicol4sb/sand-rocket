@@ -10,6 +10,10 @@ export default defineConfig({
       '@sandrocket/contracts': path.resolve(
         __dirname,
         '../../packages/contracts/src'
+      ),
+      '@sandrocket/core/spending/export-excel': path.resolve(
+        __dirname,
+        '../../packages/core/src/spending/export-excel.ts'
       )
     },
     // Prioritize .tsx and .ts files over .js files

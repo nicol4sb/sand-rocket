@@ -19,6 +19,7 @@ export * from './spending/ports.js';
 export * from './spending/lot-ports.js';
 export * from './spending/service.js';
 export * from './spending/sync-lots-from-summary.js';
+export * from './spending/export-excel.js';
 export * from './summary/types.js';
 export * from './summary/ports.js';
 export * from './summary/service.js';

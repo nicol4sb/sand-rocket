@@ -1,6 +1,11 @@
 import * as XLSX from 'xlsx';
-import type { Epic, SpendingEntry, SummaryEntry, Task } from '@sandrocket/core';
-import { sortByEntryDate, spendingDebtPaidTotal, spendingPaidTotal } from '@sandrocket/core';
+import type { Epic, SpendingEntry, SpendingLot, SummaryEntry, Task } from '@sandrocket/core';
+import {
+  buildSpendingExcelRows,
+  sortByEntryDate,
+  spendingDebtPaidTotal,
+  spendingPaidTotal
+} from '@sandrocket/core';
 
 function formatDisplayDate(iso: string): string {
   const [y, m, d] = iso.split('-');
@@ -22,29 +27,14 @@ function workbookToBuffer(
   return Buffer.from(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }));
 }
 
-/** Matches SpendingTable export / import format */
+/** Matches SpendingTable export / import format (grouped by lot) */
 export function buildSpendingExcelBuffer(
   entries: SpendingEntry[],
-  lots: Array<{ id: number; name: string }> = []
+  lots: Pick<SpendingLot, 'id' | 'name' | 'description' | 'estimateAmount' | 'position'>[] = []
 ): Buffer {
-  const lotNameById = new Map(lots.map((lot) => [lot.id, lot.name]));
-  const sorted = sortByEntryDate(entries);
-  const totalAmount = spendingPaidTotal(sorted);
-  const debtTotalAmount = spendingDebtPaidTotal(sorted);
-  const rows: (string | number)[][] = [
-    ['Lot', 'Payment date', 'Description', 'Bank', 'Paid', 'Debt', 'Amount'],
-    ...sorted.map((e) => [
-      e.lotId != null ? lotNameById.get(e.lotId) ?? '' : '',
-      e.entryDate,
-      e.description,
-      e.bank,
-      e.paid ? 'Yes' : 'No',
-      e.debtPaid ? 'Yes' : 'No',
-      e.amount
-    ]),
-    ['', '', '', 'Total spent', '', '', totalAmount],
-    ['', '', '', '', 'Debt spent', '', debtTotalAmount]
-  ];
+  const rows = buildSpendingExcelRows(entries, lots, {
+    formatDate: formatDisplayDate
+  });
   return workbookToBuffer(rows, 'Spending', [
     { wch: 16 },
     { wch: 12 },

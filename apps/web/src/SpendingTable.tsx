@@ -8,6 +8,7 @@ import type {
 } from '@sandrocket/contracts';
 import { useIsMobile } from './hooks/useMediaQuery';
 import { sortEntriesByDate } from './financeSort';
+import { buildSpendingExcelRows, isSpendingExcelMetaRow } from '@sandrocket/core/spending/export-excel';
 import {
   SpendingLotDraftRow,
   SpendingLotEstimateRow,
@@ -43,8 +44,6 @@ interface ParsedSpendingRow {
   paid: boolean;
   debtPaid: boolean;
 }
-
-const SPENDING_HEADERS = ['Lot', 'Payment date', 'Description', 'Bank', 'Paid', 'Debt', 'Amount'] as const;
 
 const SPENDING_COL = {
   LOT: 0,
@@ -233,11 +232,13 @@ function parseSpendingExcel(buffer: ArrayBuffer): ParsedSpendingRow[] {
     const amountRaw = row[amountIdx];
 
     if (isTotalRow(description, bank, amountRaw)) continue;
+    if (isSpendingExcelMetaRow(lotName, description, bank, dateRaw, amountRaw)) continue;
     if (!description && !bank && (amountRaw === '' || amountRaw == null)) continue;
 
     const amount = parseExcelAmount(amountRaw);
     if (amount === null) continue;
     if (!description && amount === 0) continue;
+    if (dateRaw === '' || dateRaw == null) continue;
 
     parsed.push({
       lotName,
@@ -302,27 +303,11 @@ function safeFilename(name: string): string {
 function exportSpendingToExcel(
   entries: SpendingEntryResponse[],
   lots: SpendingLotResponse[],
-  totalAmount: number,
   projectName: string
 ) {
-  const lotNameById = new Map(lots.map((lot) => [lot.id, lot.name]));
-  const sortedEntries = sortEntriesByDate(entries);
-  const total = paidTotal(sortedEntries);
-  const debtTotal = debtPaidTotal(sortedEntries);
-  const rows: (string | number)[][] = [
-    [...SPENDING_HEADERS],
-    ...sortedEntries.map((e) => [
-      e.lotId != null ? lotNameById.get(e.lotId) ?? '' : '',
-      formatLocaleDateMedium(e.entryDate),
-      e.description,
-      e.bank,
-      e.paid ? 'Yes' : 'No',
-      e.debtPaid ? 'Yes' : 'No',
-      e.amount
-    ]),
-    ['', '', '', 'Total spent', '', '', total],
-    ['', '', '', '', 'Debt spent', '', debtTotal]
-  ];
+  const rows = buildSpendingExcelRows(entries, lots, {
+    formatDate: formatLocaleDateMedium
+  });
   const worksheet = XLSX.utils.aoa_to_sheet(rows);
   worksheet['!cols'] = [{ wch: 16 }, { wch: 12 }, { wch: 32 }, { wch: 16 }, { wch: 8 }, { wch: 10 }, { wch: 14 }];
   const workbook = XLSX.utils.book_new();
@@ -742,7 +727,7 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
                   className="spending-export-btn"
                   onClick={(e) => {
                     e.stopPropagation();
-                    exportSpendingToExcel(entries, lots, totalAmount, projectName);
+                    exportSpendingToExcel(entries, lots, projectName);
                   }}
                   disabled={entries.length === 0}
                   title="Export spending to Excel"

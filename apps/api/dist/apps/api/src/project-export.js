@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { sortByEntryDate, spendingDebtPaidTotal, spendingPaidTotal } from '@sandrocket/core';
+import { buildSpendingExcelRows, sortByEntryDate } from '@sandrocket/core';
 function formatDisplayDate(iso) {
     const [y, m, d] = iso.split('-');
     if (!y || !m || !d)
@@ -15,26 +15,11 @@ function workbookToBuffer(rows, sheetName, colWidths) {
     XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
     return Buffer.from(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }));
 }
-/** Matches SpendingTable export / import format */
+/** Matches SpendingTable export / import format (grouped by lot) */
 export function buildSpendingExcelBuffer(entries, lots = []) {
-    const lotNameById = new Map(lots.map((lot) => [lot.id, lot.name]));
-    const sorted = sortByEntryDate(entries);
-    const totalAmount = spendingPaidTotal(sorted);
-    const debtTotalAmount = spendingDebtPaidTotal(sorted);
-    const rows = [
-        ['Lot', 'Payment date', 'Description', 'Bank', 'Paid', 'Debt', 'Amount'],
-        ...sorted.map((e) => [
-            e.lotId != null ? lotNameById.get(e.lotId) ?? '' : '',
-            e.entryDate,
-            e.description,
-            e.bank,
-            e.paid ? 'Yes' : 'No',
-            e.debtPaid ? 'Yes' : 'No',
-            e.amount
-        ]),
-        ['', '', '', 'Total spent', '', '', totalAmount],
-        ['', '', '', '', 'Debt spent', '', debtTotalAmount]
-    ];
+    const rows = buildSpendingExcelRows(entries, lots, {
+        formatDate: formatDisplayDate
+    });
     return workbookToBuffer(rows, 'Spending', [
         { wch: 16 },
         { wch: 12 },

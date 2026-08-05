@@ -8,6 +8,7 @@
   "exports": {
     ".": "./dist/index.js",
     "./auth": "./dist/auth/index.js",
+    "./spending/export-excel": "./dist/spending/export-excel.js",
     "./package.json": "./package.json"
   },
   "scripts": {
