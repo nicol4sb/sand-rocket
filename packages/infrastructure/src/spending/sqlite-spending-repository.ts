@@ -9,6 +9,7 @@ import {
 interface SpendingRow {
   id: number;
   project_id: number;
+  lot_id: number | null;
   description: string;
   amount: number;
   entry_date: string;
@@ -24,6 +25,7 @@ function mapRow(row: SpendingRow): SpendingEntry {
   return {
     id: row.id,
     projectId: row.project_id,
+    lotId: row.lot_id,
     description: row.description,
     amount: row.amount,
     entryDate: row.entry_date,
@@ -51,8 +53,8 @@ export class SqliteSpendingRepository implements SpendingRepository {
 
   constructor(private readonly db: Database) {
     this.insertStmt = db.prepare(
-      `INSERT INTO project_spending_entries (project_id, description, amount, entry_date, bank, paid, debt_paid, position, created_at, updated_at)
-       VALUES (@project_id, @description, @amount, @entry_date, @bank, @paid, @debt_paid, @position, @created_at, @updated_at)`
+      `INSERT INTO project_spending_entries (project_id, lot_id, description, amount, entry_date, bank, paid, debt_paid, position, created_at, updated_at)
+       VALUES (@project_id, @lot_id, @description, @amount, @entry_date, @bank, @paid, @debt_paid, @position, @created_at, @updated_at)`
     );
     this.findByIdStmt = db.prepare('SELECT * FROM project_spending_entries WHERE id = ?');
     this.listByProjectStmt = db.prepare(
@@ -60,6 +62,7 @@ export class SqliteSpendingRepository implements SpendingRepository {
     );
     this.updateStmt = db.prepare(
       `UPDATE project_spending_entries SET
+         lot_id = CASE WHEN @lot_id_set = 1 THEN @lot_id ELSE lot_id END,
          description = COALESCE(@description, description),
          amount = COALESCE(@amount, amount),
          entry_date = COALESCE(@entry_date, entry_date),
@@ -102,6 +105,7 @@ export class SqliteSpendingRepository implements SpendingRepository {
     const now = new Date().toISOString();
     const params = {
       project_id: input.projectId,
+      lot_id: input.lotId ?? null,
       description: input.description,
       amount: input.amount,
       entry_date: input.entryDate,
@@ -124,6 +128,8 @@ export class SqliteSpendingRepository implements SpendingRepository {
 
     this.updateStmt.run({
       id: input.id,
+      lot_id_set: input.lotId !== undefined ? 1 : 0,
+      lot_id: input.lotId ?? null,
       description: input.description ?? null,
       amount: input.amount ?? null,
       entry_date: input.entryDate ?? null,
@@ -156,6 +162,7 @@ export class SqliteSpendingRepository implements SpendingRepository {
       for (const input of inputs) {
         const info = this.insertStmt.run({
           project_id: projectId,
+          lot_id: input.lotId ?? null,
           description: input.description,
           amount: input.amount,
           entry_date: input.entryDate,

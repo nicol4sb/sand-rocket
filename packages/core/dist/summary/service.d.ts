@@ -1,5 +1,6 @@
 import { SummaryRepository } from './ports.js';
 import { SummaryEntry } from './types.js';
+import { SpendingLotRepository } from '../spending/lot-ports.js';
 export interface SummaryImportEntryInput {
     lot: string;
     fichierRetenu?: string;
@@ -23,5 +24,6 @@ export interface SummaryService {
 }
 export interface SummaryServiceDependencies {
     summary: SummaryRepository;
+    lots: SpendingLotRepository;
 }
 export declare function createSummaryService(deps: SummaryServiceDependencies): SummaryService;

@@ -1,5 +1,7 @@
 import { SummaryRepository } from './ports.js';
 import { SummaryEntry } from './types.js';
+import { SpendingLotRepository } from '../spending/lot-ports.js';
+import { syncSpendingLotsFromSummary } from '../spending/sync-lots-from-summary.js';
 
 function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
@@ -44,16 +46,22 @@ export interface SummaryService {
 
 export interface SummaryServiceDependencies {
   summary: SummaryRepository;
+  lots: SpendingLotRepository;
 }
 
 class SummaryServiceImpl implements SummaryService {
   constructor(private readonly deps: SummaryServiceDependencies) {}
+
+  private async syncLots(projectId: number): Promise<void> {
+    await syncSpendingLotsFromSummary(projectId, this.deps.summary, this.deps.lots);
+  }
 
   async list(projectId: number) {
     const [visible, entries] = await Promise.all([
       this.deps.summary.isVisible(projectId),
       this.deps.summary.listByProject(projectId)
     ]);
+    await this.syncLots(projectId);
     const totalAmount = entries.reduce((sum, e) => sum + e.amount, 0);
     return { visible, entries, totalAmount };
   }
@@ -80,6 +88,7 @@ class SummaryServiceImpl implements SummaryService {
       position: maxPos + 1
     });
     await this.deps.summary.reorderPositionsByDate(projectId);
+    await this.syncLots(projectId);
     return (await this.deps.summary.findById(created.id)) ?? created;
   }
 
@@ -99,6 +108,7 @@ class SummaryServiceImpl implements SummaryService {
     });
     if (!updated) return null;
     await this.deps.summary.reorderPositionsByDate(updated.projectId);
+    await this.syncLots(updated.projectId);
     return this.deps.summary.findById(updated.id);
   }
 
@@ -108,6 +118,7 @@ class SummaryServiceImpl implements SummaryService {
     const deleted = await this.deps.summary.delete(id);
     if (deleted) {
       await this.deps.summary.reorderPositionsByDate(existing.projectId);
+      await this.syncLots(existing.projectId);
     }
     return deleted;
   }
@@ -152,6 +163,7 @@ class SummaryServiceImpl implements SummaryService {
     }
 
     const listed = await this.deps.summary.listByProject(projectId);
+    await this.syncLots(projectId);
     const totalAmount = listed.reduce((sum, e) => sum + e.amount, 0);
     return { entries: listed, totalAmount };
   }

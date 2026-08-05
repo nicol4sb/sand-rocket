@@ -16,6 +16,7 @@ import {
   createAuthService,
   type PublicTask,
   type SpendingEntry,
+  type SpendingLot,
   type SummaryEntry
 } from '@sandrocket/core';
 import {
@@ -38,6 +39,7 @@ import {
   SqliteDocumentRepository,
   SqliteDocumentActivityRepository,
   SqliteSpendingRepository,
+  SqliteSpendingLotRepository,
   SqliteSummaryRepository
 } from '@sandrocket/infrastructure';
 import {
@@ -85,6 +87,9 @@ import type {
   DocumentActivityResponse,
   ListSpendingResponse,
   SpendingEntryResponse,
+  SpendingLotResponse,
+  CreateSpendingLotRequest,
+  UpdateSpendingLotRequest,
   ImportSpendingResponse,
   ListSummaryResponse,
   SummaryEntryResponse,
@@ -95,6 +100,8 @@ import {
   createSpendingEntryRequestSchema,
   updateSpendingEntryRequestSchema,
   importSpendingEntriesRequestSchema,
+  createSpendingLotRequestSchema,
+  updateSpendingLotRequestSchema,
   updateSummaryVisibilityRequestSchema,
   createSummaryEntryRequestSchema,
   updateSummaryEntryRequestSchema,
@@ -170,9 +177,14 @@ const documentService = createDocumentService({
   }
 });
 const spendingRepository = new SqliteSpendingRepository(database);
-const spendingService = createSpendingService({ spending: spendingRepository });
+const spendingLotRepository = new SqliteSpendingLotRepository(database);
 const summaryRepository = new SqliteSummaryRepository(database);
-const summaryService = createSummaryService({ summary: summaryRepository });
+const spendingService = createSpendingService({
+  spending: spendingRepository,
+  lots: spendingLotRepository,
+  summary: summaryRepository
+});
+const summaryService = createSummaryService({ summary: summaryRepository, lots: spendingLotRepository });
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: config.uploads.maxFileSizeBytes }
@@ -194,6 +206,7 @@ function toSpendingEntryResponse(entry: SpendingEntry): SpendingEntryResponse {
   return {
     id: entry.id,
     projectId: entry.projectId,
+    lotId: entry.lotId,
     description: entry.description,
     amount: entry.amount,
     entryDate: entry.entryDate,
@@ -203,6 +216,20 @@ function toSpendingEntryResponse(entry: SpendingEntry): SpendingEntryResponse {
     position: entry.position,
     createdAt: entry.createdAt.toISOString(),
     updatedAt: entry.updatedAt.toISOString()
+  };
+}
+
+function toSpendingLotResponse(lot: SpendingLot): SpendingLotResponse {
+  return {
+    id: lot.id,
+    projectId: lot.projectId,
+    summaryEntryId: lot.summaryEntryId,
+    name: lot.name,
+    description: lot.description,
+    estimateAmount: lot.estimateAmount,
+    position: lot.position,
+    createdAt: lot.createdAt.toISOString(),
+    updatedAt: lot.updatedAt.toISOString()
   };
 }
 
@@ -809,6 +836,108 @@ app.delete(
   })
 );
 
+app.post(
+  '/api/projects/:projectId/spending-lots',
+  asyncHandler(async (req, res) => {
+    const token = req.cookies[config.security.sessionCookieName];
+    if (!token) {
+      res.status(401).json({ error: 'auth/no-token', message: 'No token' });
+      return;
+    }
+    const payload = await tokenService.verifyToken(token);
+    const projectId = Number(req.params.projectId);
+
+    const member = await projectMemberRepository.findByProjectAndUser(projectId, payload.userId);
+    if (!member) {
+      res.status(403).json({ error: 'forbidden', message: 'Not a member of this project' });
+      return;
+    }
+
+    const body = parseBody(createSpendingLotRequestSchema, req, res);
+    if (!body) return;
+
+    const lot = await spendingService.createLot(
+      projectId,
+      body.name ?? '',
+      body.description ?? '',
+      body.estimateAmount ?? 0
+    );
+    res.status(201).json(toSpendingLotResponse(lot));
+  })
+);
+
+app.patch(
+  '/api/spending-lots/:lotId',
+  asyncHandler(async (req, res) => {
+    const token = req.cookies[config.security.sessionCookieName];
+    if (!token) {
+      res.status(401).json({ error: 'auth/no-token', message: 'No token' });
+      return;
+    }
+    const payload = await tokenService.verifyToken(token);
+    const lotId = Number(req.params.lotId);
+
+    const existing = await spendingLotRepository.findById(lotId);
+    if (!existing) {
+      res.status(404).json({ error: 'not-found', message: 'Spending lot not found' });
+      return;
+    }
+
+    const member = await projectMemberRepository.findByProjectAndUser(existing.projectId, payload.userId);
+    if (!member) {
+      res.status(403).json({ error: 'forbidden', message: 'Not a member of this project' });
+      return;
+    }
+
+    const body = parseBody(updateSpendingLotRequestSchema, req, res);
+    if (!body) return;
+
+    const updated = await spendingService.updateLot(
+      lotId,
+      body.name,
+      body.description,
+      body.estimateAmount
+    );
+    if (!updated) {
+      res.status(404).json({ error: 'not-found', message: 'Spending lot not found' });
+      return;
+    }
+    res.json(toSpendingLotResponse(updated));
+  })
+);
+
+app.delete(
+  '/api/spending-lots/:lotId',
+  asyncHandler(async (req, res) => {
+    const token = req.cookies[config.security.sessionCookieName];
+    if (!token) {
+      res.status(401).json({ error: 'auth/no-token', message: 'No token' });
+      return;
+    }
+    const payload = await tokenService.verifyToken(token);
+    const lotId = Number(req.params.lotId);
+
+    const existing = await spendingLotRepository.findById(lotId);
+    if (!existing) {
+      res.status(404).json({ error: 'not-found', message: 'Spending lot not found' });
+      return;
+    }
+
+    const member = await projectMemberRepository.findByProjectAndUser(existing.projectId, payload.userId);
+    if (!member) {
+      res.status(403).json({ error: 'forbidden', message: 'Not a member of this project' });
+      return;
+    }
+
+    const deleted = await spendingService.deleteLot(lotId);
+    if (!deleted) {
+      res.status(404).json({ error: 'not-found', message: 'Spending lot not found' });
+      return;
+    }
+    res.status(204).send();
+  })
+);
+
 app.delete(
   '/api/tasks/:taskId',
   asyncHandler(async (req, res) => {
@@ -851,7 +980,8 @@ app.get(
     const body: ListSpendingResponse = {
       visible: data.visible,
       totalAmount: data.totalAmount,
-      entries: data.entries.map(toSpendingEntryResponse)
+      entries: data.entries.map(toSpendingEntryResponse),
+      lots: data.lots.map(toSpendingLotResponse)
     };
     res.json(body);
   })
@@ -908,7 +1038,8 @@ app.post(
       body.amount,
       body.entryDate,
       body.bank ?? '',
-      body.paid ?? false
+      body.paid ?? false,
+      body.lotId ?? null
     );
     res.status(201).json(toSpendingEntryResponse(entry));
   })
@@ -942,13 +1073,16 @@ app.post(
         amount: entry.amount,
         entryDate: entry.entryDate,
         paid: entry.paid,
-        debtPaid: entry.debtPaid
+        debtPaid: entry.debtPaid,
+        lotId: entry.lotId ?? null,
+        lotName: entry.lotName
       })),
       body.replace
     );
     const response: ImportSpendingResponse = {
       totalAmount: data.totalAmount,
-      entries: data.entries.map(toSpendingEntryResponse)
+      entries: data.entries.map(toSpendingEntryResponse),
+      lots: data.lots.map(toSpendingLotResponse)
     };
     res.json(response);
   })
@@ -987,7 +1121,8 @@ app.patch(
       body.entryDate,
       body.bank,
       body.paid,
-      body.debtPaid
+      body.debtPaid,
+      body.lotId
     );
     if (!updated) {
       res.status(404).json({ error: 'not-found', message: 'Spending entry not found' });
@@ -1492,7 +1627,7 @@ app.get(
     });
     archive.pipe(res);
 
-    archive.append(buildSpendingExcelBuffer(spendingEntries), { name: 'spending.xlsx' });
+    archive.append(buildSpendingExcelBuffer(spendingEntries, spendingData.lots), { name: 'spending.xlsx' });
     archive.append(buildDevisExcelBuffer(summaryEntries), { name: 'devis.xlsx' });
     archive.append(buildTasksExcelBuffer(epicTasks), { name: 'tasks.xlsx' });
 

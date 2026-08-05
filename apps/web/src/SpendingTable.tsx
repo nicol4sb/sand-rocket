@@ -3,10 +3,21 @@ import * as XLSX from 'xlsx';
 import type {
   ImportSpendingResponse,
   ListSpendingResponse,
-  SpendingEntryResponse
+  SpendingEntryResponse,
+  SpendingLotResponse
 } from '@sandrocket/contracts';
 import { useIsMobile } from './hooks/useMediaQuery';
 import { sortEntriesByDate } from './financeSort';
+import {
+  SpendingLotDraftRow,
+  SpendingLotEstimateRow,
+  SpendingLotMigrateBar,
+  SpendingLotAssignSelect,
+  SpendingLotMobileGroup,
+  SpendingLotSubtotalRow,
+  lotSpentTotal,
+  type LotDraftRow
+} from './SpendingLotGroups';
 
 interface SpendingTableProps {
   projectId: number;
@@ -22,6 +33,7 @@ interface DraftRow {
 }
 
 interface ParsedSpendingRow {
+  lotName: string;
   entryDate: string;
   description: string;
   bank: string;
@@ -30,15 +42,16 @@ interface ParsedSpendingRow {
   debtPaid: boolean;
 }
 
-const SPENDING_HEADERS = ['Payment date', 'Description', 'Bank', 'Paid', 'Debt', 'Amount'] as const;
+const SPENDING_HEADERS = ['Lot', 'Payment date', 'Description', 'Bank', 'Paid', 'Debt', 'Amount'] as const;
 
 const SPENDING_COL = {
-  DATE: 0,
-  DESCRIPTION: 1,
-  BANK: 2,
-  PAID: 3,
-  DEBT_PAID: 4,
-  AMOUNT: 5
+  LOT: 0,
+  DATE: 1,
+  DESCRIPTION: 2,
+  BANK: 3,
+  PAID: 4,
+  DEBT_PAID: 5,
+  AMOUNT: 6
 } as const;
 
 function parsePaidValue(value: unknown): boolean {
@@ -151,9 +164,16 @@ function isTotalRow(description: string, bank: unknown, amountCell: unknown): bo
 function findHeaderRowIndex(rows: unknown[][]): number {
   for (let i = 0; i < Math.min(rows.length, 5); i++) {
     const first = String(rows[i]?.[0] ?? '').trim().toLowerCase();
+    if (first.includes('lot')) return i;
     if (first.includes('payment') || first.includes('date')) return i;
   }
   return -1;
+}
+
+function spendingHeaderHasLot(rows: unknown[][], headerIdx: number): boolean {
+  if (headerIdx < 0) return false;
+  const first = String(rows[headerIdx]?.[0] ?? '').trim().toLowerCase();
+  return first.includes('lot');
 }
 
 function spendingHeaderHasPaid(rows: unknown[][], headerIdx: number): boolean {
@@ -174,6 +194,7 @@ function spendingHeaderHasDebtPaid(rows: unknown[][], headerIdx: number): boolea
 function resolveSpendingAmountIndex(
   rows: unknown[][],
   headerIdx: number,
+  hasLotColumn: boolean,
   hasPaidColumn: boolean,
   hasDebtColumn: boolean
 ): number {
@@ -185,9 +206,9 @@ function resolveSpendingAmountIndex(
     });
     if (amountIdx >= 0) return amountIdx;
   }
-  if (hasDebtColumn) return 5;
-  if (hasPaidColumn) return 4;
-  return 3;
+  if (hasDebtColumn) return hasLotColumn ? 6 : 5;
+  if (hasPaidColumn) return hasLotColumn ? 5 : 4;
+  return hasLotColumn ? 4 : 3;
 }
 
 function parseSpendingExcel(buffer: ArrayBuffer): ParsedSpendingRow[] {
@@ -198,18 +219,25 @@ function parseSpendingExcel(buffer: ArrayBuffer): ParsedSpendingRow[] {
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as unknown[][];
   const headerIdx = findHeaderRowIndex(rows);
   const startIdx = headerIdx >= 0 ? headerIdx + 1 : 0;
+  const hasLotColumn = spendingHeaderHasLot(rows, headerIdx);
   const hasPaidColumn = spendingHeaderHasPaid(rows, headerIdx);
   const hasDebtColumn = spendingHeaderHasDebtPaid(rows, headerIdx);
-  const amountIdx = resolveSpendingAmountIndex(rows, headerIdx, hasPaidColumn, hasDebtColumn);
+  const amountIdx = resolveSpendingAmountIndex(rows, headerIdx, hasLotColumn, hasPaidColumn, hasDebtColumn);
   const parsed: ParsedSpendingRow[] = [];
 
   for (let i = startIdx; i < rows.length; i++) {
     const row = rows[i] ?? [];
-    const dateRaw = row[0];
-    const description = String(row[1] ?? '').trim();
-    const bank = String(row[2] ?? '').trim();
-    const paidRaw = hasPaidColumn ? row[3] : undefined;
-    const debtPaidRaw = hasDebtColumn ? row[4] : undefined;
+    const lotName = hasLotColumn ? String(row[0] ?? '').trim() : '';
+    const dateCol = hasLotColumn ? 1 : 0;
+    const descCol = hasLotColumn ? 2 : 1;
+    const bankCol = hasLotColumn ? 3 : 2;
+    const paidCol = hasPaidColumn ? (hasLotColumn ? 4 : 3) : -1;
+    const debtCol = hasDebtColumn ? (hasLotColumn ? 5 : 4) : -1;
+    const dateRaw = row[dateCol];
+    const description = String(row[descCol] ?? '').trim();
+    const bank = String(row[bankCol] ?? '').trim();
+    const paidRaw = paidCol >= 0 ? row[paidCol] : undefined;
+    const debtPaidRaw = debtCol >= 0 ? row[debtCol] : undefined;
     const amountRaw = row[amountIdx];
 
     if (isTotalRow(description, bank, amountRaw)) continue;
@@ -220,6 +248,7 @@ function parseSpendingExcel(buffer: ArrayBuffer): ParsedSpendingRow[] {
     if (!description && amount === 0) continue;
 
     parsed.push({
+      lotName,
       entryDate: parseExcelDate(dateRaw),
       description,
       bank,
@@ -280,15 +309,18 @@ function safeFilename(name: string): string {
 
 function exportSpendingToExcel(
   entries: SpendingEntryResponse[],
+  lots: SpendingLotResponse[],
   totalAmount: number,
   projectName: string
 ) {
+  const lotNameById = new Map(lots.map((lot) => [lot.id, lot.name]));
   const sortedEntries = sortEntriesByDate(entries);
   const total = paidTotal(sortedEntries);
   const debtTotal = debtPaidTotal(sortedEntries);
   const rows: (string | number)[][] = [
     [...SPENDING_HEADERS],
     ...sortedEntries.map((e) => [
+      e.lotId != null ? lotNameById.get(e.lotId) ?? '' : '',
       e.entryDate,
       e.description,
       e.bank,
@@ -296,11 +328,11 @@ function exportSpendingToExcel(
       e.debtPaid ? 'Yes' : 'No',
       e.amount
     ]),
-    ['', '', '', 'Total spent', '', total],
-    ['', '', '', '', 'Debt spent', debtTotal]
+    ['', '', '', 'Total spent', '', '', total],
+    ['', '', '', '', 'Debt spent', '', debtTotal]
   ];
   const worksheet = XLSX.utils.aoa_to_sheet(rows);
-  worksheet['!cols'] = [{ wch: 12 }, { wch: 32 }, { wch: 16 }, { wch: 8 }, { wch: 10 }, { wch: 14 }];
+  worksheet['!cols'] = [{ wch: 16 }, { wch: 12 }, { wch: 32 }, { wch: 16 }, { wch: 8 }, { wch: 10 }, { wch: 14 }];
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Spending');
   XLSX.writeFile(workbook, `${safeFilename(projectName)}-spending.xlsx`);
@@ -328,6 +360,7 @@ function SpendingCaret({ open }: { open: boolean }) {
 export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTableProps) {
   const [visible, setVisible] = useState(false);
   const [entries, setEntries] = useState<SpendingEntryResponse[]>([]);
+  const [lots, setLots] = useState<SpendingLotResponse[]>([]);
   const [draft, setDraft] = useState<DraftRow>(newDraftRow);
   const [draftExpanded, setDraftExpanded] = useState(false);
   const draftBlurSkipRef = useRef(false);
@@ -351,6 +384,7 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
       const data = (await res.json()) as ListSpendingResponse;
       setVisible(data.visible);
       setEntries(sortEntriesByDate(data.entries));
+      setLots(data.lots ?? []);
     } catch {
       // ignore
     } finally {
@@ -385,7 +419,8 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
     entryDate: string,
     description: string,
     bank: string,
-    amountStr: string
+    amountStr: string,
+    lotId: number | null = null
   ) => {
     const amount = parseAmount(amountStr);
     if (amount === null) return;
@@ -401,6 +436,7 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
           description: description.trim(),
           amount,
           bank: bank.trim(),
+          lotId,
           ...(entryDate.trim() ? { entryDate: entryDate.trim() } : {})
         })
       });
@@ -411,6 +447,10 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
     } finally {
       setSaving(false);
     }
+  };
+
+  const createEntryFromLotDraft = (lotId: number | null, draft: LotDraftRow) => {
+    void createEntry(draft.entryDate, draft.description, draft.bank, draft.amount, lotId);
   };
 
   const importEntries = async (parsed: ParsedSpendingRow[]) => {
@@ -441,7 +481,8 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
             amount: row.amount,
             entryDate: row.entryDate,
             paid: row.paid,
-            debtPaid: row.debtPaid
+            debtPaid: row.debtPaid,
+            lotName: row.lotName || undefined
           }))
         })
       });
@@ -451,6 +492,7 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
       }
       const data = (await res.json()) as ImportSpendingResponse;
       setEntries(sortEntriesByDate(data.entries));
+      setLots(data.lots ?? []);
       setVisible(true);
       setDraft(newDraftRow());
     } catch {
@@ -495,6 +537,7 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
       amount?: number;
       paid?: boolean;
       debtPaid?: boolean;
+      lotId?: number | null;
     },
     options?: { skipRefetch?: boolean }
   ) => {
@@ -509,6 +552,7 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
       if (patch.entryDate !== undefined) body.entryDate = resolveEntryDate(patch.entryDate);
       if (patch.paid !== undefined) body.paid = patch.paid;
       if (patch.debtPaid !== undefined) body.debtPaid = patch.debtPaid;
+      if (patch.lotId !== undefined) body.lotId = patch.lotId;
 
       const res = await fetch(`${baseUrl}/spending/${entry.id}`, {
         method: 'PATCH',
@@ -547,6 +591,44 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
     await patchEntry(entry, { debtPaid }, { skipRefetch: true });
   };
 
+  const assignEntriesToLot = async (targetEntries: SpendingEntryResponse[], lotId: number) => {
+    if (targetEntries.length === 0) return;
+    setSaving(true);
+    try {
+      setEntries((prev) =>
+        sortEntriesByDate(
+          prev.map((e) => (targetEntries.some((t) => t.id === e.id) ? { ...e, lotId } : e))
+        )
+      );
+      const results = await Promise.all(
+        targetEntries.map(async (entry) => {
+          const res = await fetch(`${baseUrl}/spending/${entry.id}`, {
+            method: 'PATCH',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lotId })
+          });
+          if (!res.ok) return null;
+          return (await res.json()) as SpendingEntryResponse;
+        })
+      );
+      const byId = new Map(
+        results.filter((r): r is SpendingEntryResponse => r != null).map((r) => [r.id, r])
+      );
+      if (byId.size > 0) {
+        setEntries((prev) =>
+          sortEntriesByDate(prev.map((e) => (byId.has(e.id) ? { ...e, ...byId.get(e.id)! } : e)))
+        );
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const assignEntryToLot = (entry: SpendingEntryResponse, lotId: number) => {
+    void assignEntriesToLot([entry], lotId);
+  };
+
   const expandDraft = () => {
     setExpandedEntryId(null);
     draftBlurSkipRef.current = true;
@@ -583,7 +665,29 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
 
   const totalAmount = paidTotal(entries);
   const debtTotalAmount = debtPaidTotal(entries);
+  const uncategorizedEntries = sortEntriesByDate(entries.filter((e) => e.lotId == null));
+
+  const assignAllUncategorizedToLot = (lotId: number) => {
+    void assignEntriesToLot(uncategorizedEntries, lotId);
+  };
+
+  const uncategorizedRowProps = (entry: SpendingEntryResponse) => ({
+    entry,
+    dateMax,
+    lots,
+    showLotAssign: lots.length > 0 && uncategorizedEntries.length > 0,
+    onAssignLot: (lotId: number) => assignEntryToLot(entry, lotId),
+    onCommit: (patch: Parameters<typeof patchEntry>[1]) => void patchEntry(entry, patch),
+    onPaidChange: (paid: boolean) => void setEntryPaid(entry, paid),
+    onDebtPaidChange: (debtPaid: boolean) => void setEntryDebtPaid(entry, debtPaid),
+    onDelete: () => void deleteEntry(entry.id)
+  });
+
   const isMobile = useIsMobile();
+
+  const renderSpendingRow = (rowProps: Parameters<typeof SpendingRow>[0]) => (
+    <SpendingRow key={rowProps.entry.id} {...rowProps} />
+  );
 
   if (loading) {
     return null;
@@ -646,7 +750,7 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
                   className="spending-export-btn"
                   onClick={(e) => {
                     e.stopPropagation();
-                    exportSpendingToExcel(entries, totalAmount, projectName);
+                    exportSpendingToExcel(entries, lots, totalAmount, projectName);
                   }}
                   disabled={entries.length === 0}
                   title="Export spending to Excel"
@@ -677,99 +781,128 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
           <div className="spending-table-wrap">
             {importError && <p className="spending-import-error">{importError}</p>}
             {isMobile ? (
-              <div className="finance-compact-list">
-                {entries.map((entry) => (
-                  <SpendingRow
-                    key={entry.id}
-                    compact
-                    entry={entry}
+              <div className="finance-compact-list spending-lot-list">
+                {lots.length === 0 && (
+                  <p className="spending-devis-link-hint">
+                    Lots and estimates come from the Devis table — add a line there first.
+                  </p>
+                )}
+                {lots.map((lot, index) => (
+                  <SpendingLotMobileGroup
+                    key={lot.id}
+                    lot={lot}
+                    colorIndex={index}
+                    entries={entries}
                     dateMax={dateMax}
-                    expanded={expandedEntryId === entry.id}
-                    onExpandedChange={(open) => {
-                      setExpandedEntryId(open ? entry.id : null);
-                      if (open) setDraftExpanded(false);
-                    }}
-                    onCommit={(patch) => void patchEntry(entry, patch)}
-                    onPaidChange={(paid) => void setEntryPaid(entry, paid)}
-                    onDebtPaidChange={(debtPaid) => void setEntryDebtPaid(entry, debtPaid)}
-                    onDelete={() => void deleteEntry(entry.id)}
+                    expandedEntryId={expandedEntryId}
+                    onExpandedChange={setExpandedEntryId}
+                    onEntryCommit={(entry, patch) => void patchEntry(entry, patch)}
+                    onPaidChange={(entry, paid) => void setEntryPaid(entry, paid)}
+                    onDebtPaidChange={(entry, debtPaid) => void setEntryDebtPaid(entry, debtPaid)}
+                    onDeleteEntry={(id) => void deleteEntry(id)}
+                    onCreateEntry={createEntryFromLotDraft}
+                    renderRow={(rowProps) => renderSpendingRow(rowProps)}
                   />
                 ))}
-                <div
-                  ref={draftRowRef}
-                  className={`finance-compact-row finance-compact-row-draft${
-                    draftExpanded ? ' finance-compact-row-expanded' : ''
-                  }`}
-                >
-                  {!draftExpanded ? (
-                    <div className="finance-compact-draft-collapsed">
-                      <input
-                        type="text"
-                        className="finance-compact-input finance-compact-draft-trigger"
-                        placeholder="Add a line…"
-                        value={draft.description}
-                        onFocus={expandDraft}
-                        onChange={(e) => {
-                          const next = e.target.value;
-                          setDraft((d) => ({ ...d, description: next }));
-                          if (next.trim() && !draftExpanded) expandDraft();
-                        }}
-                        onBlur={handleDraftBlur}
-                      />
-                    </div>
-                  ) : (
-                    <div className="finance-compact-details finance-compact-details-open">
-                      <label className="finance-compact-field">
-                        <span>Description</span>
+                {uncategorizedEntries.length > 0 && (
+                  <section className="spending-lot-mobile spending-lot-uncategorized">
+                    <h4 className="spending-lot-uncategorized-title">Uncategorized</h4>
+                    <SpendingLotMigrateBar
+                      count={uncategorizedEntries.length}
+                      lots={lots}
+                      disabled={saving}
+                      onAssignAll={assignAllUncategorizedToLot}
+                    />
+                    {uncategorizedEntries.map((entry) =>
+                      renderSpendingRow({
+                        compact: true,
+                        ...uncategorizedRowProps(entry),
+                        expanded: expandedEntryId === entry.id,
+                        onExpandedChange: (open) => {
+                          setExpandedEntryId(open ? entry.id : null);
+                          if (open) setDraftExpanded(false);
+                        }
+                      })
+                    )}
+                  </section>
+                )}
+                {lots.length === 0 && (
+                  <div
+                    ref={draftRowRef}
+                    className={`finance-compact-row finance-compact-row-draft${
+                      draftExpanded ? ' finance-compact-row-expanded' : ''
+                    }`}
+                  >
+                    {!draftExpanded ? (
+                      <div className="finance-compact-draft-collapsed">
                         <input
-                          ref={draftPrimaryRef}
                           type="text"
-                          className="finance-compact-input"
+                          className="finance-compact-input finance-compact-draft-trigger"
                           placeholder="Add a line…"
                           value={draft.description}
-                          onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
+                          onFocus={expandDraft}
+                          onChange={(e) => {
+                            const next = e.target.value;
+                            setDraft((d) => ({ ...d, description: next }));
+                            if (next.trim() && !draftExpanded) expandDraft();
+                          }}
                           onBlur={handleDraftBlur}
                         />
-                      </label>
-                      <div className="finance-compact-field-row">
+                      </div>
+                    ) : (
+                      <div className="finance-compact-details finance-compact-details-open">
                         <label className="finance-compact-field">
-                          <span>Amount</span>
+                          <span>Description</span>
                           <input
+                            ref={draftPrimaryRef}
                             type="text"
-                            inputMode="decimal"
-                            className="finance-compact-input finance-compact-input-amount"
-                            placeholder="0"
-                            value={draft.amount}
-                            onChange={(e) => setDraft((d) => ({ ...d, amount: e.target.value }))}
+                            className="finance-compact-input"
+                            placeholder="Add a line…"
+                            value={draft.description}
+                            onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
                             onBlur={handleDraftBlur}
                           />
                         </label>
+                        <div className="finance-compact-field-row">
+                          <label className="finance-compact-field">
+                            <span>Amount</span>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              className="finance-compact-input finance-compact-input-amount"
+                              placeholder="0"
+                              value={draft.amount}
+                              onChange={(e) => setDraft((d) => ({ ...d, amount: e.target.value }))}
+                              onBlur={handleDraftBlur}
+                            />
+                          </label>
+                          <label className="finance-compact-field">
+                            <span>Date</span>
+                            <input
+                              type="date"
+                              className="finance-compact-input"
+                              value={draft.entryDate}
+                              max={dateMax}
+                              onChange={(e) => setDraft((d) => ({ ...d, entryDate: e.target.value }))}
+                              onBlur={handleDraftBlur}
+                            />
+                          </label>
+                        </div>
                         <label className="finance-compact-field">
-                          <span>Date</span>
+                          <span>Bank</span>
                           <input
-                            type="date"
+                            type="text"
                             className="finance-compact-input"
-                            value={draft.entryDate}
-                            max={dateMax}
-                            onChange={(e) => setDraft((d) => ({ ...d, entryDate: e.target.value }))}
+                            placeholder="Bank…"
+                            value={draft.bank}
+                            onChange={(e) => setDraft((d) => ({ ...d, bank: e.target.value }))}
                             onBlur={handleDraftBlur}
                           />
                         </label>
                       </div>
-                      <label className="finance-compact-field">
-                        <span>Bank</span>
-                        <input
-                          type="text"
-                          className="finance-compact-input"
-                          placeholder="Bank…"
-                          value={draft.bank}
-                          onChange={(e) => setDraft((d) => ({ ...d, bank: e.target.value }))}
-                          onBlur={handleDraftBlur}
-                        />
-                      </label>
-                    </div>
-                  )}
-                </div>
+                    )}
+                  </div>
+                )}
                 <div className="finance-compact-totals">
                   <div className="finance-compact-total finance-compact-total-spending">
                     <span>Total spent</span>
@@ -783,6 +916,11 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
               </div>
             ) : (
             <>
+            {lots.length === 0 && (
+              <p className="spending-devis-link-hint">
+                Lots and estimates come from the Devis table — add a line there first.
+              </p>
+            )}
             <table className="spending-table">
               <thead>
                 <tr>
@@ -797,69 +935,61 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
                   <th className="spending-col-actions" aria-label="Actions" />
                 </tr>
               </thead>
-              <tbody>
-                {entries.map((entry) => (
-                  <SpendingRow
-                    key={entry.id}
-                    entry={entry}
+              {lots.map((lot, index) => {
+                const lotEntries = sortEntriesByDate(entries.filter((e) => e.lotId === lot.id));
+                const spent = lotSpentTotal(entries, lot.id);
+                return (
+                  <tbody key={lot.id} className={`spending-lot-group spending-lot-group--${index % 6}`}>
+                    <SpendingLotEstimateRow lot={lot} colorIndex={index} />
+                    {lotEntries.map((entry) =>
+                      renderSpendingRow({
+                        entry,
+                        dateMax,
+                        onCommit: (patch) => void patchEntry(entry, patch),
+                        onPaidChange: (paid) => void setEntryPaid(entry, paid),
+                        onDebtPaidChange: (debtPaid) => void setEntryDebtPaid(entry, debtPaid),
+                        onDelete: () => void deleteEntry(entry.id)
+                      })
+                    )}
+                    <SpendingLotDraftRow
+                      lotId={lot.id}
+                      dateMax={dateMax}
+                      onCreate={createEntryFromLotDraft}
+                      colHandlers={(col) => (e) => onSpendingCellKeyDown(e, col)}
+                    />
+                    <SpendingLotSubtotalRow lot={lot} spent={spent} colorIndex={index} />
+                  </tbody>
+                );
+              })}
+              {(uncategorizedEntries.length > 0 || lots.length === 0) && (
+                <tbody className="spending-lot-group spending-lot-uncategorized">
+                  {lots.length > 0 && (
+                    <tr className="spending-lot-section-label">
+                      <td colSpan={7}>Uncategorized spending</td>
+                    </tr>
+                  )}
+                  {uncategorizedEntries.length > 0 && lots.length > 0 && (
+                    <tr className="spending-lot-migrate-row">
+                      <td colSpan={7}>
+                        <SpendingLotMigrateBar
+                          count={uncategorizedEntries.length}
+                          lots={lots}
+                          disabled={saving}
+                          onAssignAll={assignAllUncategorizedToLot}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                  {uncategorizedEntries.map((entry) => renderSpendingRow(uncategorizedRowProps(entry)))}
+                  <SpendingLotDraftRow
+                    lotId={null}
                     dateMax={dateMax}
-                    onCommit={(patch) => void patchEntry(entry, patch)}
-                    onPaidChange={(paid) => void setEntryPaid(entry, paid)}
-                    onDebtPaidChange={(debtPaid) => void setEntryDebtPaid(entry, debtPaid)}
-                    onDelete={() => void deleteEntry(entry.id)}
+                    onCreate={createEntryFromLotDraft}
+                    colHandlers={(col) => (e) => onSpendingCellKeyDown(e, col)}
                   />
-                ))}
-                <tr className="spending-row-draft">
-                  <td className="spending-col-date" data-label="Payment date">
-                    <input
-                      type="date"
-                      className="spending-input spending-input-date"
-                      value={draft.entryDate}
-                      max={dateMax}
-                      onChange={(e) => setDraft((d) => ({ ...d, entryDate: e.target.value }))}
-                      onBlur={handleDraftBlur}
-                      onKeyDown={(e) => onSpendingCellKeyDown(e, SPENDING_COL.DATE)}
-                      title={`Optional — defaults to today (up to ${formatDisplayDate(dateMax)})`}
-                    />
-                  </td>
-                  <td data-label="Description">
-                    <input
-                      type="text"
-                      className="spending-input"
-                      placeholder="Add a line…"
-                      value={draft.description}
-                      onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
-                      onBlur={handleDraftBlur}
-                      onKeyDown={(e) => onSpendingCellKeyDown(e, SPENDING_COL.DESCRIPTION)}
-                    />
-                  </td>
-                  <td className="spending-col-bank" data-label="Bank">
-                    <input
-                      type="text"
-                      className="spending-input"
-                      placeholder="Bank…"
-                      value={draft.bank}
-                      onChange={(e) => setDraft((d) => ({ ...d, bank: e.target.value }))}
-                      onBlur={handleDraftBlur}
-                      onKeyDown={(e) => onSpendingCellKeyDown(e, SPENDING_COL.BANK)}
-                    />
-                  </td>
-                  <td className="spending-col-paid" data-label="Paid" />
-                  <td className="spending-col-debt-paid" data-label="Debt" />
-                  <td className="spending-col-amount" data-label="Amount">
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      className="spending-input spending-input-amount"
-                      placeholder="0"
-                      value={draft.amount}
-                      onChange={(e) => setDraft((d) => ({ ...d, amount: e.target.value }))}
-                      onBlur={handleDraftBlur}
-                      onKeyDown={(e) => onSpendingCellKeyDown(e, SPENDING_COL.AMOUNT)}
-                    />
-                  </td>
-                  <td className="spending-col-actions" />
-                </tr>
+                </tbody>
+              )}
+              <tbody>
                 <tr className="spending-row-total">
                   <td colSpan={5}>Total spent</td>
                   <td className="spending-col-amount">{formatAmount(totalAmount)}</td>
@@ -887,6 +1017,9 @@ function SpendingRow(props: {
   onExpandedChange?: (expanded: boolean) => void;
   entry: SpendingEntryResponse;
   dateMax: string;
+  lots?: SpendingLotResponse[];
+  showLotAssign?: boolean;
+  onAssignLot?: (lotId: number) => void;
   onCommit: (patch: {
     entryDate?: string;
     description?: string;
@@ -1134,6 +1267,12 @@ function SpendingRow(props: {
                 onBlur={handleCompactBlur}
               />
             </label>
+            {props.showLotAssign && props.lots && props.onAssignLot && (
+              <label className="finance-compact-field">
+                <span>Lot</span>
+                <SpendingLotAssignSelect lots={props.lots} onAssign={props.onAssignLot} />
+              </label>
+            )}
             <div className="finance-compact-details-actions">{deleteButton}</div>
           </div>
         )}
@@ -1206,6 +1345,9 @@ function SpendingRow(props: {
         />
       </td>
       <td className="spending-col-actions">
+        {props.showLotAssign && props.lots && props.onAssignLot && (
+          <SpendingLotAssignSelect lots={props.lots} onAssign={props.onAssignLot} compact />
+        )}
         {deleteButton}
       </td>
     </tr>

@@ -27,18 +27,18 @@ import { DoneArchive } from './DoneArchive';
 import { DocumentDropbox } from './DocumentDropbox';
 import { SpendingTable } from './SpendingTable';
 import { SummaryTable } from './SummaryTable';
+import {
+  ProjectBoardTabs,
+  readStoredProjectTab,
+  storeProjectTab,
+  type ProjectBoardTab
+} from './ProjectBoardTabs';
 import './styles.css';
 
 const DEFAULT_BASE_URL = '/api';
 const SELECTED_PROJECT_KEY = 'sr:selectedProjectId';
 
 type UiTask = TaskResponse;
-
-function scrollBoardSection(sectionId: string): void {
-  const section = document.getElementById(sectionId);
-  if (!section) return;
-  section.scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
 
 function scrollToEpic(epicId: number): void {
   const epic = document.getElementById(`epic-${epicId}`);
@@ -80,6 +80,7 @@ export default function App() {
   const [invitationToken, setInvitationToken] = useState<string | null>(null);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteLink, setInviteLink] = useState<string>('');
+  const [activeBoardTab, setActiveBoardTab] = useState<ProjectBoardTab>('finance');
 
   // Check for invitation token in URL
   useEffect(() => {
@@ -218,6 +219,18 @@ export default function App() {
     };
     run();
   }, [auth, baseUrl, selectedProjectId]);
+
+  useEffect(() => {
+    if (!selectedProjectId) return;
+    setActiveBoardTab(readStoredProjectTab(selectedProjectId));
+  }, [selectedProjectId]);
+
+  const handleBoardTabChange = (tab: ProjectBoardTab) => {
+    setActiveBoardTab(tab);
+    if (selectedProjectId) {
+      storeProjectTab(selectedProjectId, tab);
+    }
+  };
 
   useEffect(() => {
     if (!auth) return;
@@ -925,7 +938,7 @@ export default function App() {
               </>
             )}
           </div>
-          {selectedProjectId && (
+          {selectedProjectId && activeBoardTab === 'tasks' && (
             <button 
               type="button" 
               className="mobile-add-epic-btn" 
@@ -943,46 +956,51 @@ export default function App() {
           <div className="card">No project selected</div>
         ) : (
           <>
-            <div className="board-layout">
-              <nav className="board-mobile-nav" aria-label="Jump to section">
-                <button type="button" onClick={() => scrollBoardSection('board-spending')}>Spending</button>
-                <button type="button" onClick={() => scrollBoardSection('board-devis')}>Devis</button>
-                <button type="button" onClick={() => scrollBoardSection('board-epics')}>Tasks</button>
-                <button type="button" onClick={() => scrollBoardSection('board-done')}>Done</button>
-                <button type="button" onClick={() => scrollBoardSection('board-documents')}>Docs</button>
-              </nav>
-              <SpendingTable projectId={current.id} projectName={current.name} baseUrl={baseUrl} />
-              <SummaryTable projectId={current.id} projectName={current.name} baseUrl={baseUrl} />
-              <div id="board-epics" className="epic-columns board-section">
-                {(epicsByProject[current.id] ?? []).map((e) => (
-                  <EpicLane
-                    key={e.id}
-                    epic={e}
-                    tasks={tasksByEpic[e.id] ?? []}
-                    baseUrl={baseUrl}
-                    onInlineUpdate={(id, fields) => updateTask(id, fields)}
-                    onReorder={(taskId, position) => reorderTask(taskId, e.id, position)}
-                    onToggleDone={(taskId, done) => void toggleTaskDone(taskId, done)}
-                    onDeleteTask={(id) => deleteTask(id)}
-                    onCreateTask={(epicId, description) => createTask(epicId, description)}
-                    onEpicUpdate={(id, fields) => updateEpic(id, fields)}
-                    onDeleteEpic={(id) => deleteEpic(id)}
-                    currentUserId={auth.user.id}
+            <ProjectBoardTabs
+              activeTab={activeBoardTab}
+              onTabChange={handleBoardTabChange}
+              finance={
+                <>
+                  <SpendingTable projectId={current.id} projectName={current.name} baseUrl={baseUrl} />
+                  <SummaryTable projectId={current.id} projectName={current.name} baseUrl={baseUrl} />
+                </>
+              }
+              tasks={
+                <>
+                  <div id="board-epics" className="epic-columns board-section">
+                    {(epicsByProject[current.id] ?? []).map((e) => (
+                      <EpicLane
+                        key={e.id}
+                        epic={e}
+                        tasks={tasksByEpic[e.id] ?? []}
+                        baseUrl={baseUrl}
+                        onInlineUpdate={(id, fields) => updateTask(id, fields)}
+                        onReorder={(taskId, position) => reorderTask(taskId, e.id, position)}
+                        onToggleDone={(taskId, done) => void toggleTaskDone(taskId, done)}
+                        onDeleteTask={(id) => deleteTask(id)}
+                        onCreateTask={(epicId, description) => createTask(epicId, description)}
+                        onEpicUpdate={(id, fields) => updateEpic(id, fields)}
+                        onDeleteEpic={(id) => deleteEpic(id)}
+                        currentUserId={auth.user.id}
+                      />
+                    ))}
+                  </div>
+                  <DoneArchive
+                    epics={epicsByProject[current.id] ?? []}
+                    tasksByEpic={tasksByEpic}
+                    orphanedDoneTasks={orphanedDoneTasks}
+                    onRestore={(taskId) => void toggleTaskDone(taskId, false)}
+                    onDelete={(id) => deleteTask(id)}
+                    onGoToEpic={scrollToEpic}
                   />
-                ))}
-              </div>
-              <DoneArchive
-                epics={epicsByProject[current.id] ?? []}
-                tasksByEpic={tasksByEpic}
-                orphanedDoneTasks={orphanedDoneTasks}
-                onRestore={(taskId) => void toggleTaskDone(taskId, false)}
-                onDelete={(id) => deleteTask(id)}
-                onGoToEpic={scrollToEpic}
-              />
-              <div id="board-documents" className="doc-dropbox-section board-section">
-                <DocumentDropbox projectId={current.id} baseUrl={baseUrl} />
-              </div>
-            </div>
+                </>
+              }
+              documents={
+                <div id="board-documents" className="doc-dropbox-section board-section">
+                  <DocumentDropbox projectId={current.id} baseUrl={baseUrl} />
+                </div>
+              }
+            />
           </>
         )}
       </section>

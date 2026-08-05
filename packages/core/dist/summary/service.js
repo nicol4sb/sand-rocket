@@ -1,3 +1,4 @@
+import { syncSpendingLotsFromSummary } from '../spending/sync-lots-from-summary.js';
 function todayIsoDate() {
     return new Date().toISOString().slice(0, 10);
 }
@@ -9,11 +10,15 @@ class SummaryServiceImpl {
     constructor(deps) {
         this.deps = deps;
     }
+    async syncLots(projectId) {
+        await syncSpendingLotsFromSummary(projectId, this.deps.summary, this.deps.lots);
+    }
     async list(projectId) {
         const [visible, entries] = await Promise.all([
             this.deps.summary.isVisible(projectId),
             this.deps.summary.listByProject(projectId)
         ]);
+        await this.syncLots(projectId);
         const totalAmount = entries.reduce((sum, e) => sum + e.amount, 0);
         return { visible, entries, totalAmount };
     }
@@ -32,6 +37,7 @@ class SummaryServiceImpl {
             position: maxPos + 1
         });
         await this.deps.summary.reorderPositionsByDate(projectId);
+        await this.syncLots(projectId);
         return (await this.deps.summary.findById(created.id)) ?? created;
     }
     async updateEntry(id, lot, amount, entryDate, fichierRetenu) {
@@ -45,6 +51,7 @@ class SummaryServiceImpl {
         if (!updated)
             return null;
         await this.deps.summary.reorderPositionsByDate(updated.projectId);
+        await this.syncLots(updated.projectId);
         return this.deps.summary.findById(updated.id);
     }
     async deleteEntry(id) {
@@ -54,6 +61,7 @@ class SummaryServiceImpl {
         const deleted = await this.deps.summary.delete(id);
         if (deleted) {
             await this.deps.summary.reorderPositionsByDate(existing.projectId);
+            await this.syncLots(existing.projectId);
         }
         return deleted;
     }
@@ -92,6 +100,7 @@ class SummaryServiceImpl {
             await this.deps.summary.reorderPositionsByDate(projectId);
         }
         const listed = await this.deps.summary.listByProject(projectId);
+        await this.syncLots(projectId);
         const totalAmount = listed.reduce((sum, e) => sum + e.amount, 0);
         return { entries: listed, totalAmount };
     }

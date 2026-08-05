@@ -16,13 +16,15 @@ function workbookToBuffer(rows, sheetName, colWidths) {
     return Buffer.from(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }));
 }
 /** Matches SpendingTable export / import format */
-export function buildSpendingExcelBuffer(entries) {
+export function buildSpendingExcelBuffer(entries, lots = []) {
+    const lotNameById = new Map(lots.map((lot) => [lot.id, lot.name]));
     const sorted = sortByEntryDate(entries);
     const totalAmount = spendingPaidTotal(sorted);
     const debtTotalAmount = spendingDebtPaidTotal(sorted);
     const rows = [
-        ['Payment date', 'Description', 'Bank', 'Paid', 'Debt', 'Amount'],
+        ['Lot', 'Payment date', 'Description', 'Bank', 'Paid', 'Debt', 'Amount'],
         ...sorted.map((e) => [
+            e.lotId != null ? lotNameById.get(e.lotId) ?? '' : '',
             e.entryDate,
             e.description,
             e.bank,
@@ -30,10 +32,11 @@ export function buildSpendingExcelBuffer(entries) {
             e.debtPaid ? 'Yes' : 'No',
             e.amount
         ]),
-        ['', '', '', 'Total spent', '', totalAmount],
-        ['', '', '', '', 'Debt spent', debtTotalAmount]
+        ['', '', '', 'Total spent', '', '', totalAmount],
+        ['', '', '', '', 'Debt spent', '', debtTotalAmount]
     ];
     return workbookToBuffer(rows, 'Spending', [
+        { wch: 16 },
         { wch: 12 },
         { wch: 32 },
         { wch: 16 },

@@ -1,6 +1,7 @@
 export interface SpendingEntry {
     id: number;
     projectId: number;
+    lotId: number | null;
     description: string;
     amount: number;
     entryDate: string;
@@ -13,6 +14,7 @@ export interface SpendingEntry {
 }
 export interface CreateSpendingEntryInput {
     projectId: number;
+    lotId?: number | null;
     description: string;
     amount: number;
     entryDate: string;
@@ -23,6 +25,7 @@ export interface CreateSpendingEntryInput {
 }
 export interface UpdateSpendingEntryInput {
     id: number;
+    lotId?: number | null;
     description?: string;
     amount?: number;
     entryDate?: string;

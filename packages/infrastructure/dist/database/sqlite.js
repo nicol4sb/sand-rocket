@@ -156,9 +156,24 @@ export function initializeSqliteDatabase(options) {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_doc_activity_project ON document_activity_log(project_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS project_spending_lots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL,
+      summary_entry_id INTEGER UNIQUE,
+      name TEXT NOT NULL DEFAULT '',
+      description TEXT NOT NULL DEFAULT '',
+      estimate_amount REAL NOT NULL DEFAULT 0,
+      position INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (summary_entry_id) REFERENCES project_summary_entries(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_spending_lots_project ON project_spending_lots(project_id, position ASC, id ASC);
     CREATE TABLE IF NOT EXISTS project_spending_entries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       project_id INTEGER NOT NULL,
+      lot_id INTEGER,
       description TEXT NOT NULL DEFAULT '',
       amount REAL NOT NULL DEFAULT 0,
       entry_date TEXT NOT NULL DEFAULT (date('now')),
@@ -168,7 +183,8 @@ export function initializeSqliteDatabase(options) {
       position INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (lot_id) REFERENCES project_spending_lots(id) ON DELETE SET NULL
     );
     CREATE INDEX IF NOT EXISTS idx_spending_project ON project_spending_entries(project_id, entry_date ASC, id ASC);
     CREATE TABLE IF NOT EXISTS project_summary_entries (
@@ -376,6 +392,51 @@ export function initializeSqliteDatabase(options) {
     catch (err) {
         // eslint-disable-next-line no-console
         console.error('[db] Migration error for summary lot/fichier_retenu:', err);
+    }
+    // Migration: spending lots + lot_id on spending entries
+    try {
+        const lotTable = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='project_spending_lots'`).get();
+        if (!lotTable) {
+            db.exec(`
+        CREATE TABLE project_spending_lots (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_id INTEGER NOT NULL,
+          name TEXT NOT NULL DEFAULT '',
+          description TEXT NOT NULL DEFAULT '',
+          estimate_amount REAL NOT NULL DEFAULT 0,
+          position INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_spending_lots_project ON project_spending_lots(project_id, position ASC, id ASC);
+      `);
+        }
+        const spendingInfo = db.prepare(`PRAGMA table_info('project_spending_entries')`).all();
+        if (spendingInfo.length > 0 && !spendingInfo.some((col) => col.name === 'lot_id')) {
+            db.exec(`ALTER TABLE project_spending_entries ADD COLUMN lot_id INTEGER REFERENCES project_spending_lots(id) ON DELETE SET NULL`);
+        }
+    }
+    catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[db] Migration error for spending lots:', err);
+    }
+    // Migration: link spending lots to devis (summary) lines
+    try {
+        const lotInfo = db.prepare(`PRAGMA table_info('project_spending_lots')`).all();
+        if (lotInfo.length > 0 && !lotInfo.some((col) => col.name === 'summary_entry_id')) {
+            db.exec(`
+        ALTER TABLE project_spending_lots ADD COLUMN summary_entry_id INTEGER
+          REFERENCES project_summary_entries(id) ON DELETE CASCADE;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_spending_lots_summary_entry
+          ON project_spending_lots(summary_entry_id)
+          WHERE summary_entry_id IS NOT NULL;
+      `);
+        }
+    }
+    catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[db] Migration error for spending lot summary link:', err);
     }
     // Migration: preserve done tasks when epic deleted (project_id, epic_name, nullable epic_id)
     try {

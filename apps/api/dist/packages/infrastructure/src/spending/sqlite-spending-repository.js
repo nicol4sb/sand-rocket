@@ -2,6 +2,7 @@ function mapRow(row) {
     return {
         id: row.id,
         projectId: row.project_id,
+        lotId: row.lot_id,
         description: row.description,
         amount: row.amount,
         entryDate: row.entry_date,
@@ -16,11 +17,12 @@ function mapRow(row) {
 export class SqliteSpendingRepository {
     constructor(db) {
         this.db = db;
-        this.insertStmt = db.prepare(`INSERT INTO project_spending_entries (project_id, description, amount, entry_date, bank, paid, debt_paid, position, created_at, updated_at)
-       VALUES (@project_id, @description, @amount, @entry_date, @bank, @paid, @debt_paid, @position, @created_at, @updated_at)`);
+        this.insertStmt = db.prepare(`INSERT INTO project_spending_entries (project_id, lot_id, description, amount, entry_date, bank, paid, debt_paid, position, created_at, updated_at)
+       VALUES (@project_id, @lot_id, @description, @amount, @entry_date, @bank, @paid, @debt_paid, @position, @created_at, @updated_at)`);
         this.findByIdStmt = db.prepare('SELECT * FROM project_spending_entries WHERE id = ?');
         this.listByProjectStmt = db.prepare('SELECT * FROM project_spending_entries WHERE project_id = ? ORDER BY entry_date ASC, id ASC');
         this.updateStmt = db.prepare(`UPDATE project_spending_entries SET
+         lot_id = CASE WHEN @lot_id_set = 1 THEN @lot_id ELSE lot_id END,
          description = COALESCE(@description, description),
          amount = COALESCE(@amount, amount),
          entry_date = COALESCE(@entry_date, entry_date),
@@ -49,6 +51,7 @@ export class SqliteSpendingRepository {
         const now = new Date().toISOString();
         const params = {
             project_id: input.projectId,
+            lot_id: input.lotId ?? null,
             description: input.description,
             amount: input.amount,
             entry_date: input.entryDate,
@@ -71,6 +74,8 @@ export class SqliteSpendingRepository {
             return null;
         this.updateStmt.run({
             id: input.id,
+            lot_id_set: input.lotId !== undefined ? 1 : 0,
+            lot_id: input.lotId ?? null,
             description: input.description ?? null,
             amount: input.amount ?? null,
             entry_date: input.entryDate ?? null,
@@ -97,6 +102,7 @@ export class SqliteSpendingRepository {
             for (const input of inputs) {
                 const info = this.insertStmt.run({
                     project_id: projectId,
+                    lot_id: input.lotId ?? null,
                     description: input.description,
                     amount: input.amount,
                     entry_date: input.entryDate,
