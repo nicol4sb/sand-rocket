@@ -73,6 +73,10 @@ function debtPaidTotal(entries: SpendingEntryResponse[]): number {
   return entries.filter((e) => e.debtPaid).reduce((sum, e) => sum + e.amount, 0);
 }
 
+function nonDebtPaidTotal(entries: SpendingEntryResponse[]): number {
+  return entries.filter((e) => e.paid && !e.debtPaid).reduce((sum, e) => sum + e.amount, 0);
+}
+
 function todayIso(): string {
   return toIsoDate(new Date());
 }
@@ -642,6 +646,7 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
 
   const totalAmount = paidTotal(entries);
   const debtTotalAmount = debtPaidTotal(entries);
+  const nonDebtTotalAmount = nonDebtPaidTotal(entries);
   const uncategorizedEntries = sortEntriesByDate(entries.filter((e) => e.lotId == null));
 
   const assignAllUncategorizedToLot = (lotId: number) => {
@@ -887,13 +892,17 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
                   </div>
                 )}
                 <div className="finance-compact-totals">
-                  <div className="finance-compact-total finance-compact-total-spending">
-                    <span>Total spent</span>
-                    <strong>{formatAmount(totalAmount)}</strong>
-                  </div>
                   <div className="finance-compact-total finance-compact-total-debt">
                     <span>Debt spent</span>
                     <strong>{formatAmount(debtTotalAmount)}</strong>
+                  </div>
+                  <div className="finance-compact-total finance-compact-total-non-debt">
+                    <span>Non debt spend</span>
+                    <strong>{formatAmount(nonDebtTotalAmount)}</strong>
+                  </div>
+                  <div className="finance-compact-total finance-compact-total-spending">
+                    <span>Total spent</span>
+                    <strong>{formatAmount(totalAmount)}</strong>
                   </div>
                 </div>
               </div>
@@ -965,15 +974,21 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
                 </tbody>
               )}
               <tbody>
-                <tr className="spending-row-total">
-                  <td colSpan={5}>Total spent</td>
-                  <td className="spending-col-amount">{formatAmount(totalAmount)}</td>
-                  <td className="spending-col-lot" />
-                  <td className="spending-col-actions" />
-                </tr>
                 <tr className="spending-row-total spending-row-total-debt">
                   <td colSpan={5}>Debt spent</td>
                   <td className="spending-col-amount">{formatAmount(debtTotalAmount)}</td>
+                  <td className="spending-col-lot" />
+                  <td className="spending-col-actions" />
+                </tr>
+                <tr className="spending-row-total spending-row-total-non-debt">
+                  <td colSpan={5}>Non debt spend</td>
+                  <td className="spending-col-amount">{formatAmount(nonDebtTotalAmount)}</td>
+                  <td className="spending-col-lot" />
+                  <td className="spending-col-actions" />
+                </tr>
+                <tr className="spending-row-total">
+                  <td colSpan={5}>Total spent</td>
+                  <td className="spending-col-amount">{formatAmount(totalAmount)}</td>
                   <td className="spending-col-lot" />
                   <td className="spending-col-actions" />
                 </tr>

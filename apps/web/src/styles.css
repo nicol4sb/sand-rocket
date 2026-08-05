@@ -3468,6 +3468,14 @@ footer {
   color: #569cd6;
 }
 
+.finance-compact-total-non-debt {
+  border: 1px solid #c586c0;
+}
+
+.finance-compact-total-non-debt strong {
+  color: #c586c0;
+}
+
 .finance-compact-total-devis {
   border: 1px solid #569cd6;
 }
@@ -4204,6 +4212,10 @@ footer {
 
 .spending-row-total-debt td {
   color: #569cd6;
+}
+
+.spending-row-total-non-debt td {
+  color: #c586c0;
 }
 
 .spending-add-lot-bar {

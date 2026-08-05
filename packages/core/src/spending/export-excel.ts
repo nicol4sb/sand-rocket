@@ -1,5 +1,5 @@
 import { spendingLotPaidTotal } from './lot-types.js';
-import { spendingDebtPaidTotal, spendingPaidTotal } from './types.js';
+import { spendingDebtPaidTotal, spendingNonDebtPaidTotal, spendingPaidTotal } from './types.js';
 
 export const SPENDING_EXCEL_HEADERS = [
   'Lot',
@@ -101,8 +101,10 @@ export function buildSpendingExcelRows(
 
   const total = spendingPaidTotal(entries);
   const debtTotal = spendingDebtPaidTotal(entries);
-  rows.push(['', '', '', 'Total spent', '', '', total]);
+  const nonDebtTotal = spendingNonDebtPaidTotal(entries);
   rows.push(['', '', '', '', 'Debt spent', '', debtTotal]);
+  rows.push(['', '', '', '', '', 'Non debt spend', nonDebtTotal]);
+  rows.push(['', '', '', 'Total spent', '', '', total]);
 
   return rows;
 }
@@ -122,6 +124,7 @@ export function isSpendingExcelMetaRow(
   if (lot === 'uncategorized' && dateEmpty && amountEmpty) return true;
   if (desc.startsWith('subtotal')) return true;
   if (dateEmpty && desc === 'estimate') return true;
+  if (/^(debt spent|non debt spend)$/i.test(desc)) return true;
   if (dateEmpty && amountEmpty && !bank.trim()) return true;
 
   return false;

@@ -45,3 +45,9 @@ export function spendingDebtPaidTotal(
 ): number {
   return entries.filter((e) => e.debtPaid).reduce((sum, e) => sum + e.amount, 0);
 }
+
+export function spendingNonDebtPaidTotal(
+  entries: Pick<SpendingEntry, 'amount' | 'paid' | 'debtPaid'>[]
+): number {
+  return entries.filter((e) => e.paid && !e.debtPaid).reduce((sum, e) => sum + e.amount, 0);
+}
