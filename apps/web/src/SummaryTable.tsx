@@ -7,6 +7,8 @@ import type {
 } from '@sandrocket/contracts';
 import { useIsMobile } from './hooks/useMediaQuery';
 import { sortEntriesByDate } from './financeSort';
+import { LocaleDateInput } from './LocaleDateInput';
+import { formatLocaleDate, formatLocaleDateMedium, parseFlexibleDisplayDate } from './localeFormat';
 
 interface SummaryTableProps {
   projectId: number;
@@ -82,12 +84,8 @@ function parseExcelDate(value: unknown): string {
     }
   }
   const str = String(value).trim();
-  const frMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (frMatch) {
-    const [, d, m, y] = frMatch;
-    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
-  }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  const flexible = parseFlexibleDisplayDate(str);
+  if (flexible) return flexible;
   return todayIso();
 }
 
@@ -101,12 +99,6 @@ function formatAmount(amount: number): string {
 function formatAmountInput(amount: number): string {
   if (amount === 0) return '';
   return formatAmount(amount);
-}
-
-function formatDisplayDate(iso: string): string {
-  const [y, m, d] = iso.split('-');
-  if (!y || !m || !d) return iso;
-  return `${d}/${m}/${y}`;
 }
 
 function rowHasContent(lot: string, amountStr: string): boolean {
@@ -226,7 +218,7 @@ function exportSummaryToExcel(
     ...sortedEntries.map((e) => [
       e.lot,
       e.fichierRetenu,
-      formatDisplayDate(e.entryDate),
+      formatLocaleDateMedium(e.entryDate),
       e.amount
     ]),
     ['', '', 'Total TTC', totalAmount]
@@ -645,12 +637,11 @@ export function SummaryTable({ projectId, projectName, baseUrl }: SummaryTablePr
                         </label>
                         <label className="finance-compact-field">
                           <span>Date</span>
-                          <input
-                            type="date"
-                            className="finance-compact-input"
+                          <LocaleDateInput
+                            displayClassName="finance-compact-input locale-date-display-field"
                             value={draft.entryDate}
                             max={dateMax}
-                            onChange={(e) => setDraft((d) => ({ ...d, entryDate: e.target.value }))}
+                            onChange={(next) => setDraft((d) => ({ ...d, entryDate: next }))}
                             onBlur={handleDraftBlur}
                           />
                         </label>
@@ -724,15 +715,14 @@ export function SummaryTable({ projectId, projectName, baseUrl }: SummaryTablePr
                     />
                   </td>
                   <td className="summary-col-date" data-label="Date du devis">
-                    <input
-                      type="date"
-                      className="summary-input summary-input-date"
+                    <LocaleDateInput
+                      displayClassName="summary-input summary-input-date locale-date-display-field"
                       value={draft.entryDate}
                       max={dateMax}
-                      onChange={(e) => setDraft((d) => ({ ...d, entryDate: e.target.value }))}
+                      onChange={(next) => setDraft((d) => ({ ...d, entryDate: next }))}
                       onBlur={handleDraftBlur}
                       onKeyDown={(e) => onSummaryCellKeyDown(e, SUMMARY_COL.DATE)}
-                      title={`Defaults to today (up to ${formatDisplayDate(dateMax)})`}
+                      title={`Defaults to today (up to ${formatLocaleDate(dateMax)})`}
                     />
                   </td>
                   <td className="summary-col-amount" data-label="TTC (€)">
@@ -863,7 +853,7 @@ function SummaryRow(props: {
       amount.trim() || (props.entry.amount === 0 ? '' : formatAmount(props.entry.amount));
     const metaParts = [
       fichierRetenu.trim() || null,
-      formatDisplayDate(entryDate)
+      formatLocaleDateMedium(entryDate)
     ].filter(Boolean);
 
     return (
@@ -915,12 +905,11 @@ function SummaryRow(props: {
               </label>
               <label className="finance-compact-field">
                 <span>Date</span>
-                <input
-                  type="date"
-                  className="finance-compact-input"
+                <LocaleDateInput
+                  displayClassName="finance-compact-input locale-date-display-field"
                   value={entryDate}
                   max={props.dateMax}
-                  onChange={(e) => commitDate(e.target.value)}
+                  onChange={commitDate}
                   onBlur={handleCompactBlur}
                 />
               </label>
@@ -965,12 +954,11 @@ function SummaryRow(props: {
         />
       </td>
       <td className="summary-col-date" data-label="Date du devis">
-        <input
-          type="date"
-          className="summary-input summary-input-date"
+        <LocaleDateInput
+          displayClassName="summary-input summary-input-date locale-date-display-field"
           value={entryDate}
           max={props.dateMax}
-          onChange={(e) => commitDate(e.target.value)}
+          onChange={commitDate}
           onBlur={commitAll}
           onKeyDown={(e) => onSummaryCellKeyDown(e, SUMMARY_COL.DATE)}
         />

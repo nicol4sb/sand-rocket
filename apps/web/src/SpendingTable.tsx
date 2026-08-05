@@ -12,12 +12,14 @@ import {
   SpendingLotDraftRow,
   SpendingLotEstimateRow,
   SpendingLotMigrateBar,
-  SpendingLotAssignSelect,
+  SpendingLotAssignCaret,
   SpendingLotMobileGroup,
   SpendingLotSubtotalRow,
   lotSpentTotal,
   type LotDraftRow
 } from './SpendingLotGroups';
+import { LocaleDateInput } from './LocaleDateInput';
+import { formatLocaleDate, formatLocaleDateMedium, parseFlexibleDisplayDate } from './localeFormat';
 
 interface SpendingTableProps {
   projectId: number;
@@ -117,12 +119,8 @@ function parseExcelDate(value: unknown): string {
     }
   }
   const str = String(value).trim();
-  const frMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (frMatch) {
-    const [, d, m, y] = frMatch;
-    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
-  }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  const flexible = parseFlexibleDisplayDate(str);
+  if (flexible) return flexible;
   return todayIso();
 }
 
@@ -136,12 +134,6 @@ function formatAmount(amount: number): string {
 function formatAmountInput(amount: number): string {
   if (amount === 0) return '';
   return formatAmount(amount);
-}
-
-function formatDisplayDate(iso: string): string {
-  const [y, m, d] = iso.split('-');
-  if (!y || !m || !d) return iso;
-  return `${d}/${m}/${y}`;
 }
 
 function rowHasContent(description: string, amountStr: string): boolean {
@@ -321,7 +313,7 @@ function exportSpendingToExcel(
     [...SPENDING_HEADERS],
     ...sortedEntries.map((e) => [
       e.lotId != null ? lotNameById.get(e.lotId) ?? '' : '',
-      e.entryDate,
+      formatLocaleDateMedium(e.entryDate),
       e.description,
       e.bank,
       e.paid ? 'Yes' : 'No',
@@ -671,11 +663,11 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
     void assignEntriesToLot(uncategorizedEntries, lotId);
   };
 
-  const uncategorizedRowProps = (entry: SpendingEntryResponse) => ({
+  const spendingRowProps = (entry: SpendingEntryResponse) => ({
     entry,
     dateMax,
     lots,
-    showLotAssign: lots.length > 0 && uncategorizedEntries.length > 0,
+    showLotAssign: lots.length > 0,
     onAssignLot: (lotId: number) => assignEntryToLot(entry, lotId),
     onCommit: (patch: Parameters<typeof patchEntry>[1]) => void patchEntry(entry, patch),
     onPaidChange: (paid: boolean) => void setEntryPaid(entry, paid),
@@ -801,7 +793,14 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
                     onDebtPaidChange={(entry, debtPaid) => void setEntryDebtPaid(entry, debtPaid)}
                     onDeleteEntry={(id) => void deleteEntry(id)}
                     onCreateEntry={createEntryFromLotDraft}
-                    renderRow={(rowProps) => renderSpendingRow(rowProps)}
+                    renderRow={(rowProps) =>
+                      renderSpendingRow({
+                        ...spendingRowProps(rowProps.entry),
+                        compact: rowProps.compact,
+                        expanded: rowProps.expanded,
+                        onExpandedChange: rowProps.onExpandedChange
+                      })
+                    }
                   />
                 ))}
                 {uncategorizedEntries.length > 0 && (
@@ -816,7 +815,7 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
                     {uncategorizedEntries.map((entry) =>
                       renderSpendingRow({
                         compact: true,
-                        ...uncategorizedRowProps(entry),
+                        ...spendingRowProps(entry),
                         expanded: expandedEntryId === entry.id,
                         onExpandedChange: (open) => {
                           setExpandedEntryId(open ? entry.id : null);
@@ -878,12 +877,11 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
                           </label>
                           <label className="finance-compact-field">
                             <span>Date</span>
-                            <input
-                              type="date"
-                              className="finance-compact-input"
+                            <LocaleDateInput
+                              displayClassName="finance-compact-input locale-date-display-field"
                               value={draft.entryDate}
                               max={dateMax}
-                              onChange={(e) => setDraft((d) => ({ ...d, entryDate: e.target.value }))}
+                              onChange={(next) => setDraft((d) => ({ ...d, entryDate: next }))}
                               onBlur={handleDraftBlur}
                             />
                           </label>
@@ -932,6 +930,7 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
                   <th className="spending-col-paid">Paid</th>
                   <th className="spending-col-debt-paid">Debt</th>
                   <th className="spending-col-amount">Amount</th>
+                  <th className="spending-col-lot" aria-label="Lot" />
                   <th className="spending-col-actions" aria-label="Actions" />
                 </tr>
               </thead>
@@ -941,16 +940,7 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
                 return (
                   <tbody key={lot.id} className={`spending-lot-group spending-lot-group--${index % 6}`}>
                     <SpendingLotEstimateRow lot={lot} colorIndex={index} />
-                    {lotEntries.map((entry) =>
-                      renderSpendingRow({
-                        entry,
-                        dateMax,
-                        onCommit: (patch) => void patchEntry(entry, patch),
-                        onPaidChange: (paid) => void setEntryPaid(entry, paid),
-                        onDebtPaidChange: (debtPaid) => void setEntryDebtPaid(entry, debtPaid),
-                        onDelete: () => void deleteEntry(entry.id)
-                      })
-                    )}
+                    {lotEntries.map((entry) => renderSpendingRow(spendingRowProps(entry)))}
                     <SpendingLotDraftRow
                       lotId={lot.id}
                       dateMax={dateMax}
@@ -965,12 +955,12 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
                 <tbody className="spending-lot-group spending-lot-uncategorized">
                   {lots.length > 0 && (
                     <tr className="spending-lot-section-label">
-                      <td colSpan={7}>Uncategorized spending</td>
+                      <td colSpan={8}>Uncategorized spending</td>
                     </tr>
                   )}
                   {uncategorizedEntries.length > 0 && lots.length > 0 && (
                     <tr className="spending-lot-migrate-row">
-                      <td colSpan={7}>
+                      <td colSpan={8}>
                         <SpendingLotMigrateBar
                           count={uncategorizedEntries.length}
                           lots={lots}
@@ -980,7 +970,7 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
                       </td>
                     </tr>
                   )}
-                  {uncategorizedEntries.map((entry) => renderSpendingRow(uncategorizedRowProps(entry)))}
+                  {uncategorizedEntries.map((entry) => renderSpendingRow(spendingRowProps(entry)))}
                   <SpendingLotDraftRow
                     lotId={null}
                     dateMax={dateMax}
@@ -993,11 +983,13 @@ export function SpendingTable({ projectId, projectName, baseUrl }: SpendingTable
                 <tr className="spending-row-total">
                   <td colSpan={5}>Total spent</td>
                   <td className="spending-col-amount">{formatAmount(totalAmount)}</td>
+                  <td className="spending-col-lot" />
                   <td className="spending-col-actions" />
                 </tr>
                 <tr className="spending-row-total spending-row-total-debt">
                   <td colSpan={5}>Debt spent</td>
                   <td className="spending-col-amount">{formatAmount(debtTotalAmount)}</td>
+                  <td className="spending-col-lot" />
                   <td className="spending-col-actions" />
                 </tr>
               </tbody>
@@ -1171,7 +1163,7 @@ function SpendingRow(props: {
     const summaryAmount =
       amount.trim() || (props.entry.amount === 0 ? '' : formatAmount(props.entry.amount));
     const metaParts = [
-      formatDisplayDate(entryDate),
+      formatLocaleDateMedium(entryDate),
       bank.trim() || null
     ].filter(Boolean);
 
@@ -1242,12 +1234,11 @@ function SpendingRow(props: {
               </label>
               <label className="finance-compact-field">
                 <span>Date</span>
-                <input
-                  type="date"
-                  className="finance-compact-input"
+                <LocaleDateInput
+                  displayClassName="finance-compact-input locale-date-display-field"
                   value={entryDate}
                   max={props.dateMax}
-                  onChange={(e) => commitDate(e.target.value)}
+                  onChange={commitDate}
                   onBlur={handleCompactBlur}
                 />
               </label>
@@ -1268,10 +1259,14 @@ function SpendingRow(props: {
               />
             </label>
             {props.showLotAssign && props.lots && props.onAssignLot && (
-              <label className="finance-compact-field">
+              <div className="finance-compact-field finance-compact-field-inline">
                 <span>Lot</span>
-                <SpendingLotAssignSelect lots={props.lots} onAssign={props.onAssignLot} />
-              </label>
+                <SpendingLotAssignCaret
+                  lots={props.lots}
+                  currentLotId={props.entry.lotId}
+                  onAssign={props.onAssignLot}
+                />
+              </div>
             )}
             <div className="finance-compact-details-actions">{deleteButton}</div>
           </div>
@@ -1283,12 +1278,11 @@ function SpendingRow(props: {
   return (
     <tr className={`spending-row${tableUnpaidClass}`}>
       <td className="spending-col-date" data-label="Payment date">
-        <input
-          type="date"
-          className="spending-input spending-input-date"
+        <LocaleDateInput
+          displayClassName="spending-input spending-input-date locale-date-display-field"
           value={entryDate}
           max={props.dateMax}
-          onChange={(e) => commitDate(e.target.value)}
+          onChange={commitDate}
           onBlur={commitAll}
           onKeyDown={(e) => onSpendingCellKeyDown(e, SPENDING_COL.DATE)}
           title="Optional — defaults to today"
@@ -1344,10 +1338,16 @@ function SpendingRow(props: {
           onKeyDown={(e) => onSpendingCellKeyDown(e, SPENDING_COL.AMOUNT)}
         />
       </td>
-      <td className="spending-col-actions">
+      <td className="spending-col-lot" data-label="Lot">
         {props.showLotAssign && props.lots && props.onAssignLot && (
-          <SpendingLotAssignSelect lots={props.lots} onAssign={props.onAssignLot} compact />
+          <SpendingLotAssignCaret
+            lots={props.lots}
+            currentLotId={props.entry.lotId}
+            onAssign={props.onAssignLot}
+          />
         )}
+      </td>
+      <td className="spending-col-actions">
         {deleteButton}
       </td>
     </tr>

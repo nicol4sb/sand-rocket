@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import type { TaskResponse } from '@sandrocket/contracts';
+import { formatRelativeDateTime } from './localeFormat';
 
 interface DoneArchiveProps {
   epics: Array<{ id: number; name: string }>;
@@ -11,12 +12,7 @@ interface DoneArchiveProps {
 }
 
 function formatDoneTime(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffDays = Math.floor((now.getTime() - date.getTime()) / 86400000);
-  if (diffDays < 1) return 'today';
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString();
+  return formatRelativeDateTime(dateStr);
 }
 
 export function DoneArchive(props: DoneArchiveProps) {

@@ -38,6 +38,7 @@ export async function syncSpendingLotsFromSummary(
           id: matched.id,
           summaryEntryId: entry.id,
           name: entry.lot.trim(),
+          description: entry.fichierRetenu.trim(),
           estimateAmount: entry.amount,
           position: entry.position
         });
@@ -48,19 +49,21 @@ export async function syncSpendingLotsFromSummary(
           projectId,
           summaryEntryId: entry.id,
           name: entry.lot.trim(),
-          description: '',
+          description: entry.fichierRetenu.trim(),
           estimateAmount: entry.amount,
           position: entry.position
         });
       }
     } else if (
       lot.name !== entry.lot.trim() ||
+      lot.description !== entry.fichierRetenu.trim() ||
       lot.estimateAmount !== entry.amount ||
       lot.position !== entry.position
     ) {
       const updated = await lots.update({
         id: lot.id,
         name: entry.lot.trim(),
+        description: entry.fichierRetenu.trim(),
         estimateAmount: entry.amount,
         position: entry.position
       });

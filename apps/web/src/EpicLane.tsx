@@ -21,26 +21,14 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { TaskResponse } from '@sandrocket/contracts';
 import { InlineText } from './App';
+import { formatRelativeDateTime } from './localeFormat';
 
 // Re-export InlineText type for EpicLane usage
 
 type UiTask = TaskResponse;
 
 function TaskInfo(props: { task: UiTask; currentUserId: number }) {
-  const formatTime = (dateStr: string) => {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-    
-    if (diffMins < 1) return 'just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString();
-  };
+  const formatTime = (dateStr: string) => formatRelativeDateTime(dateStr);
 
   const getUserLabel = (userId: number) => {
     return userId === props.currentUserId ? 'You' : `User ${userId}`;

@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { SpendingEntryResponse, SpendingLotResponse } from '@sandrocket/contracts';
 import { sortEntriesByDate } from './financeSort';
+import { LocaleDateInput } from './LocaleDateInput';
 
 export function lotSpentTotal(entries: SpendingEntryResponse[], lotId: number): number {
   return entries.filter((e) => e.lotId === lotId && e.paid).reduce((sum, e) => sum + e.amount, 0);
@@ -73,6 +74,86 @@ export function SpendingLotAssignSelect(props: {
   );
 }
 
+function LotCaretIcon() {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 10 10"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M2 3.5 5 6.5 8 3.5" />
+    </svg>
+  );
+}
+
+export function SpendingLotAssignCaret(props: {
+  lots: SpendingLotResponse[];
+  currentLotId?: number | null;
+  onAssign: (lotId: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc, true);
+    return () => document.removeEventListener('mousedown', onDoc, true);
+  }, [open]);
+
+  if (props.lots.length === 0) return null;
+
+  const currentName =
+    props.currentLotId != null
+      ? props.lots.find((lot) => lot.id === props.currentLotId)?.name.trim()
+      : '';
+
+  return (
+    <div className="spending-lot-assign-caret-wrap" ref={wrapRef}>
+      <button
+        type="button"
+        className={`spending-lot-assign-caret${open ? ' spending-lot-assign-caret-open' : ''}`}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => setOpen((value) => !value)}
+        title={currentName ? `Lot: ${currentName}. Change lot` : 'Change lot'}
+        aria-label="Change lot"
+        aria-expanded={open}
+        aria-haspopup="menu"
+      >
+        <LotCaretIcon />
+      </button>
+      {open && (
+        <div className="spending-lot-assign-menu" role="menu">
+          {props.lots.map((lot) => (
+            <button
+              key={lot.id}
+              type="button"
+              role="menuitem"
+              className={`spending-lot-assign-menu-item${
+                lot.id === props.currentLotId ? ' spending-lot-assign-menu-item-active' : ''
+              }`}
+              onClick={() => {
+                props.onAssign(lot.id);
+                setOpen(false);
+              }}
+            >
+              {lot.name.trim() || 'Unnamed lot'}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SpendingLotMigrateBar(props: {
   count: number;
   lots: SpendingLotResponse[];
@@ -124,13 +205,18 @@ interface SpendingLotEstimateRowProps {
 }
 
 export function SpendingLotEstimateRow(props: SpendingLotEstimateRowProps) {
+  const title = props.lot.name.trim() || 'Unnamed lot';
+  const fichierRetenu = props.lot.description.trim();
+
   return (
     <tr className={`spending-lot-estimate spending-lot-group--${props.colorIndex % 6}`}>
       <td className="spending-col-date spending-lot-estimate-date" data-label="Payment date">
-        <span className="spending-lot-badge spending-lot-badge-devis">Devis</span>
+        <span className="spending-lot-devis-title">{title}</span>
       </td>
       <td data-label="Description">
-        <span className="spending-lot-name-readonly">{props.lot.name.trim() || 'Unnamed lot'}</span>
+        {fichierRetenu ? (
+          <span className="spending-lot-fichier-readonly">{fichierRetenu}</span>
+        ) : null}
       </td>
       <td className="spending-col-bank" />
       <td className="spending-col-paid" />
@@ -138,6 +224,7 @@ export function SpendingLotEstimateRow(props: SpendingLotEstimateRowProps) {
       <td className="spending-col-amount" data-label="Amount">
         <span className="spending-lot-estimate-readonly">{formatLotAmount(props.lot.estimateAmount)}</span>
       </td>
+      <td className="spending-col-lot" />
       <td className="spending-col-actions" />
     </tr>
   );
@@ -163,6 +250,7 @@ export function SpendingLotSubtotalRow(props: SpendingLotSubtotalRowProps) {
           {over ? `Over by ${formatLotAmount(Math.abs(diff))}` : `${formatLotAmount(diff)} remaining`}
         </span>
       </td>
+      <td className="spending-col-lot" />
       <td className="spending-col-actions" />
     </tr>
   );
@@ -187,12 +275,11 @@ export function SpendingLotDraftRow(props: SpendingLotDraftRowProps) {
   return (
     <tr className="spending-row-draft spending-lot-expense-draft">
       <td className="spending-col-date" data-label="Payment date">
-        <input
-          type="date"
-          className="spending-input spending-input-date"
+        <LocaleDateInput
+          displayClassName="spending-input spending-input-date locale-date-display-field"
           value={draft.entryDate}
           max={props.dateMax}
-          onChange={(e) => setDraft((d) => ({ ...d, entryDate: e.target.value }))}
+          onChange={(next) => setDraft((d) => ({ ...d, entryDate: next }))}
           onBlur={commit}
           onKeyDown={props.colHandlers(0)}
         />
@@ -233,6 +320,7 @@ export function SpendingLotDraftRow(props: SpendingLotDraftRowProps) {
           onKeyDown={props.colHandlers(5)}
         />
       </td>
+      <td className="spending-col-lot" />
       <td className="spending-col-actions" />
     </tr>
   );
@@ -286,17 +374,21 @@ export function SpendingLotMobileGroup(props: SpendingLotMobileGroupProps) {
   const [draftExpanded, setDraftExpanded] = useState(false);
 
   const lotEntries = sortEntriesByDate(props.entries.filter((e) => e.lotId === props.lot.id));
+  const title = props.lot.name.trim() || 'Unnamed lot';
+  const fichierRetenu = props.lot.description.trim();
 
   return (
     <section className={`spending-lot-mobile spending-lot-group--${props.colorIndex % 6}`}>
       <div className="spending-lot-mobile-estimate">
         <div className="spending-lot-mobile-estimate-head">
-          <span className="spending-lot-badge spending-lot-badge-devis">Devis</span>
+          <strong className="spending-lot-devis-title">{title}</strong>
         </div>
-        <div className="spending-lot-mobile-field">
-          <span>Lot</span>
-          <strong className="spending-lot-name-readonly">{props.lot.name.trim() || 'Unnamed lot'}</strong>
-        </div>
+        {fichierRetenu && (
+          <div className="spending-lot-mobile-field">
+            <span>Fichier retenu</span>
+            <strong className="spending-lot-fichier-readonly">{fichierRetenu}</strong>
+          </div>
+        )}
         <div className="spending-lot-mobile-estimate-amount">
           <span>Estimate</span>
           <strong className="spending-lot-estimate-readonly">{formatLotAmount(props.lot.estimateAmount)}</strong>
@@ -366,12 +458,11 @@ export function SpendingLotMobileGroup(props: SpendingLotMobileGroupProps) {
               </label>
               <label className="finance-compact-field">
                 <span>Date</span>
-                <input
-                  type="date"
-                  className="finance-compact-input"
+                <LocaleDateInput
+                  displayClassName="finance-compact-input locale-date-display-field"
                   value={draft.entryDate}
                   max={props.dateMax}
-                  onChange={(e) => setDraft((d) => ({ ...d, entryDate: e.target.value }))}
+                  onChange={(next) => setDraft((d) => ({ ...d, entryDate: next }))}
                 />
               </label>
             </div>

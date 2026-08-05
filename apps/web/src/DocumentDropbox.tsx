@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { DocumentResponse, DocumentActivityResponse, ListDocumentsResponse } from '@sandrocket/contracts';
+import { formatRelativeDateTime } from './localeFormat';
 
 interface DocumentDropboxProps {
   projectId: number;
@@ -15,17 +16,7 @@ function formatBytes(bytes: number): string {
 }
 
 function formatDate(iso: string): string {
-  const d = new Date(iso);
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 1) return 'just now';
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHrs = Math.floor(diffMin / 60);
-  if (diffHrs < 24) return `${diffHrs}h ago`;
-  const diffDays = Math.floor(diffHrs / 24);
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return d.toLocaleDateString();
+  return formatRelativeDateTime(iso);
 }
 
 function isViewableInBrowser(mimeType: string): boolean {
